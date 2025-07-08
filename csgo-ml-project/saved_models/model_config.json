@@ -1,0 +1,39 @@
+{
+  "model_version": "1.0.0",
+  "training_date": "2025-07-08T17:18:56.050753",
+  "features_count": 20,
+  "models_performance": {
+    "rf_classifier_accuracy": 0.6915740272865083,
+    "logistic_classifier_accuracy": 0.6819732187973724,
+    "rf_regressor_r2": 0.08634365606151395,
+    "linear_regressor_r2": 0.00803230339428096
+  },
+  "data_info": {
+    "total_samples": 79157,
+    "classification_samples": 79157,
+    "regression_samples": 712,
+    "features": [
+      "InternalTeamId",
+      "MatchId",
+      "RoundId",
+      "RLethalGrenadesThrown",
+      "RNonLethalGrenadesThrown",
+      "RoundKills",
+      "RoundAssists",
+      "RoundHeadshots",
+      "PrimaryAssaultRifle",
+      "PrimarySniperRifle",
+      "PrimaryHeavy",
+      "PrimarySMG",
+      "PrimaryPistol",
+      "MatchKills",
+      "MatchAssists",
+      "MatchHeadshots",
+      "RoundStartingEquipmentValue",
+      "TeamStartingEquipmentValue",
+      "Team_Encoded",
+      "MatchWinner_Encoded"
+    ],
+    "has_valid_regression": true
+  }
+}
