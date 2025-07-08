@@ -1,292 +1,182 @@
-# test_api.py - Ejemplos de uso de la API CS:GO
-import requests
-import json
+# test_model.py - Probar el modelo CS:GO con las características correctas
+import pickle
+import numpy as np
+import os
 
-# URL base de la API (cambiar si está en otro servidor)
-BASE_URL = "http://localhost:5001"
+print("🧪 PRUEBA DEL MODELO CS:GO")
+print("=" * 40)
 
-def test_api_connection():
-    """Probar que la API está funcionando"""
-    try:
-        response = requests.get(f"{BASE_URL}/")
-        if response.status_code == 200:
-            print("✅ API conectada exitosamente!")
-            print(json.dumps(response.json(), indent=2))
-            return True
-        else:
-            print(f"❌ Error conectando a la API: {response.status_code}")
-            return False
-    except requests.exceptions.ConnectionError:
-        print("❌ No se puede conectar a la API. ¿Está ejecutándose?")
-        return False
-
-def test_health():
-    """Verificar estado de salud de la API"""
-    try:
-        response = requests.get(f"{BASE_URL}/health")
-        print(f"\n🔍 Estado de salud: {response.status_code}")
-        print(json.dumps(response.json(), indent=2))
-    except Exception as e:
-        print(f"Error: {e}")
-
-def get_features():
-    """Obtener características que acepta el modelo"""
-    try:
-        response = requests.get(f"{BASE_URL}/features")
-        if response.status_code == 200:
-            print("\n📋 Características del modelo:")
-            data = response.json()
-            print(f"Características requeridas: {len(data['required_features'])}")
-            print(f"Todas las características: {len(data['all_features'])}")
-            print("\n💡 Ejemplo de entrada:")
-            print(json.dumps(data['example_input'], indent=2))
-            return data['example_input']
-        else:
-            print(f"Error obteniendo características: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
-
-def test_survival_prediction():
-    """Probar predicción de supervivencia"""
-    print("\n🎯 Probando predicción de supervivencia...")
+def load_models():
+    """Cargar los modelos guardados"""
     
-    # Datos de ejemplo - jugador con buenas estadísticas
-    player_data = {
-        "Team": "Terrorist",
-        "InternalTeamId": 1,
-        "MatchId": 100,
-        "RoundId": 5,
-        "MatchWinner": True,
-        "TravelledDistance": 3500.0,
-        "RLethalGrenadesThrown": 1,
-        "RNonLethalGrenadesThrown": 2,
-        "PrimaryAssaultRifle": 0.8,
-        "PrimarySniperRifle": 0.0,
-        "PrimaryHeavy": 0.0,
-        "PrimarySMG": 0.1,
-        "PrimaryPistol": 0.1,
-        "FirstKillTime": 15.0,
-        "RoundKills": 3,
-        "RoundAssists": 2,
-        "RoundHeadshots": 2,
-        "RoundStartingEquipmentValue": 4500,
-        "TeamStartingEquipmentValue": 20000
+    model_paths = {
+        'clasificacion': "models/models/modelos_clasificacion.pkl",
+        'regresion': "models/models/modelos_regresion.pkl"
     }
     
-    try:
-        response = requests.post(
-            f"{BASE_URL}/predict/survival",
-            json=player_data,
-            headers={'Content-Type': 'application/json'}
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            print(f"¿Sobrevive?: {'✅ SÍ' if result['will_survive'] else '❌ NO'}")
-            print(f"Probabilidad de supervivencia: {result['probability']['survival']:.1%}")
-            print(f"Confianza: {result['confidence']:.1%}")
-        else:
-            print(f"Error: {response.status_code}")
-            print(response.json())
-            
-    except Exception as e:
-        print(f"Error: {e}")
-
-def test_time_prediction():
-    """Probar predicción de tiempo de vida"""
-    print("\n⏱️ Probando predicción de tiempo de vida...")
-    
-    # Datos de ejemplo - jugador defensivo
-    player_data = {
-        "Team": "Counter-Terrorist",
-        "InternalTeamId": 2,
-        "MatchId": 200,
-        "RoundId": 8,
-        "MatchWinner": False,
-        "TravelledDistance": 2000.0,
-        "RLethalGrenadesThrown": 0,
-        "RNonLethalGrenadesThrown": 1,
-        "PrimaryAssaultRifle": 0.9,
-        "PrimarySniperRifle": 0.1,
-        "PrimaryHeavy": 0.0,
-        "PrimarySMG": 0.0,
-        "PrimaryPistol": 0.0,
-        "FirstKillTime": 45.0,
-        "RoundKills": 1,
-        "RoundAssists": 1,
-        "RoundHeadshots": 1,
-        "RoundStartingEquipmentValue": 5000,
-        "TeamStartingEquipmentValue": 22000
-    }
+    print("📂 Cargando modelos...")
     
     try:
-        response = requests.post(
-            f"{BASE_URL}/predict/time",
-            json=player_data,
-            headers={'Content-Type': 'application/json'}
-        )
+        with open(model_paths['clasificacion'], 'rb') as f:
+            modelos_clasificacion = pickle.load(f)
         
-        if response.status_code == 200:
-            result = response.json()
-            print(f"Tiempo predicho: {result['predicted_seconds']:.1f} segundos")
-            print(f"En minutos: {result['predicted_minutes']:.2f} minutos")
-            print(f"Interpretación: {result['interpretation']}")
-        else:
-            print(f"Error: {response.status_code}")
-            print(response.json())
-            
-    except Exception as e:
-        print(f"Error: {e}")
-
-def test_full_prediction():
-    """Probar predicción completa (supervivencia + tiempo)"""
-    print("\n🎮 Probando predicción completa...")
-    
-    # Datos de ejemplo - jugador balanceado
-    player_data = {
-        "Team": "Terrorist",
-        "InternalTeamId": 1,
-        "MatchId": 300,
-        "RoundId": 12,
-        "MatchWinner": True,
-        "TravelledDistance": 3000.0,
-        "RLethalGrenadesThrown": 1,
-        "RNonLethalGrenadesThrown": 1,
-        "PrimaryAssaultRifle": 0.6,
-        "PrimarySniperRifle": 0.2,
-        "PrimaryHeavy": 0.0,
-        "PrimarySMG": 0.1,
-        "PrimaryPistol": 0.1,
-        "FirstKillTime": 25.0,
-        "RoundKills": 2,
-        "RoundAssists": 1,
-        "RoundHeadshots": 1,
-        "RoundStartingEquipmentValue": 4000,
-        "TeamStartingEquipmentValue": 18000
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/predict",
-            json=player_data,
-            headers={'Content-Type': 'application/json'}
-        )
+        with open(model_paths['regresion'], 'rb') as f:
+            modelos_regresion = pickle.load(f)
         
-        if response.status_code == 200:
-            result = response.json()
-            
-            # Extraer resultados
-            survival = result['prediction']['survival']
-            time_info = result['prediction']['time_alive']
-            
-            print("📊 RESULTADOS COMPLETOS:")
-            print(f"   ¿Sobrevive?: {'✅ SÍ' if survival['will_survive'] else '❌ NO'}")
-            print(f"   Probabilidad: {survival['probability']['survival']:.1%}")
-            print(f"   Confianza: {survival['confidence']:.1%}")
-            print(f"   Tiempo predicho: {time_info['predicted_seconds']:.1f}s ({time_info['predicted_minutes']:.2f} min)")
-            print(f"   Rendimiento: {time_info['interpretation']}")
-            
-            print(f"\n🤖 Información del modelo:")
-            model_info = result['model_info']
-            print(f"   Clasificador: {model_info['classifier']} (Accuracy: {model_info['classifier_accuracy']})")
-            print(f"   Regresor: {model_info['regressor']} (R²: {model_info['regressor_r2']})")
-            
-        else:
-            print(f"Error: {response.status_code}")
-            print(response.json())
-            
-    except Exception as e:
-        print(f"Error: {e}")
-
-def test_batch_prediction():
-    """Probar predicciones en lote"""
-    print("\n📦 Probando predicciones en lote...")
-    
-    # Múltiples jugadores con diferentes perfiles
-    batch_data = {
-        "players": [
-            {
-                "Team": "Terrorist",
-                "RoundKills": 4,
-                "RoundHeadshots": 3,
-                "TravelledDistance": 4000.0,
-                "PrimaryAssaultRifle": 0.9,
-                "RoundStartingEquipmentValue": 5000
-            },
-            {
-                "Team": "Counter-Terrorist", 
-                "RoundKills": 0,
-                "RoundHeadshots": 0,
-                "TravelledDistance": 1000.0,
-                "PrimaryPistol": 0.8,
-                "RoundStartingEquipmentValue": 800
-            },
-            {
-                "Team": "Terrorist",
-                "RoundKills": 2,
-                "RoundHeadshots": 1,
-                "TravelledDistance": 2500.0,
-                "PrimarySniperRifle": 0.7,
-                "RoundStartingEquipmentValue": 4750
-            }
-        ]
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/batch_predict",
-            json=batch_data,
-            headers={'Content-Type': 'application/json'}
-        )
+        # Usar Random Forest (el más común)
+        classifier = modelos_clasificacion['Random Forest']
+        regressor = modelos_regresion['Random Forest']
         
-        if response.status_code == 200:
-            result = response.json()
-            
-            print(f"📊 Procesados: {result['total_players']} jugadores")
-            print(f"✅ Exitosos: {result['successful_predictions']}")
-            
-            for player_result in result['results']:
-                if 'error' not in player_result:
-                    print(f"\n   Jugador {player_result['player_index']}:")
-                    print(f"      Supervivencia: {'✅' if player_result['will_survive'] else '❌'} ({player_result['survival_probability']:.1%})")
-                    print(f"      Tiempo: {player_result['predicted_time_seconds']:.1f}s")
-                else:
-                    print(f"\n   Jugador {player_result['player_index']}: ❌ {player_result['error']}")
-                    
-        else:
-            print(f"Error: {response.status_code}")
-            print(response.json())
-            
+        print(f"✅ Modelos cargados exitosamente")
+        print(f"   🎯 Clasificador espera: {classifier.n_features_in_} características")
+        print(f"   ⏱️  Regressor espera: {regressor.n_features_in_} características")
+        
+        return classifier, regressor
+        
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"❌ Error cargando modelos: {str(e)}")
+        return None, None
 
-def main():
-    """Ejecutar todas las pruebas"""
-    print("🧪 PRUEBAS DE LA API CS:GO")
-    print("=" * 50)
+def test_with_correct_features():
+    """Probar el modelo con las características correctas"""
     
-    # Verificar conexión
-    if not test_api_connection():
-        print("\n❌ No se puede conectar a la API. Asegúrate de que esté ejecutándose:")
-        print("   python app.py")
+    classifier, regressor = load_models()
+    if classifier is None or regressor is None:
         return
     
-    # Pruebas individuales
-    test_health()
-    get_features()
-    test_survival_prediction()
-    test_time_prediction()
-    test_full_prediction()
-    test_batch_prediction()
+    print(f"\n🧪 Probando modelo...")
     
-    print("\n✅ Todas las pruebas completadas!")
-    print("\n💡 Casos de uso:")
-    print("   - Usar /predict para análisis completo")
-    print("   - Usar /predict/survival para decisiones rápidas")
-    print("   - Usar /predict/time para estrategias de tiempo")
-    print("   - Usar /batch_predict para análisis de equipos")
+    # Características más importantes para CS:GO (ajustar según tu modelo)
+    test_data = [
+        2,      # RoundKills
+        1,      # RoundHeadshots  
+        1,      # RoundAssists
+        15.0,   # FirstKillTime
+        3500.0, # TravelledDistance
+        1,      # RLethalGrenadesThrown
+        0.7     # PrimaryAssaultRifle
+    ]
+    
+    try:
+        # Convertir a array numpy
+        X_test = np.array(test_data).reshape(1, -1)
+        
+        print(f"📊 Datos de prueba: {X_test[0]}")
+        
+        # Predicción de supervivencia
+        survival_pred = classifier.predict(X_test)[0]
+        survival_proba = classifier.predict_proba(X_test)[0]
+        
+        print(f"\n🎯 PREDICCIÓN DE SUPERVIVENCIA:")
+        print(f"   Resultado: {'✅ SOBREVIVE' if survival_pred else '❌ MUERE'}")
+        print(f"   Probabilidad muerte: {survival_proba[0]:.1%}")
+        print(f"   Probabilidad supervivencia: {survival_proba[1]:.1%}")
+        
+        # Predicción de tiempo
+        time_pred = regressor.predict(X_test)[0]
+        
+        print(f"\n⏱️  PREDICCIÓN DE TIEMPO:")
+        print(f"   Tiempo predicho: {time_pred:.1f} segundos")
+        print(f"   En minutos: {time_pred/60:.2f} minutos")
+        
+        # Interpretación del tiempo
+        if time_pred < 30:
+            interpretation = "Muy corto - probablemente muere rápido"
+        elif time_pred < 90:
+            interpretation = "Corto - muere en la primera mitad"
+        elif time_pred < 150:
+            interpretation = "Medio - sobrevive hasta la mitad"
+        else:
+            interpretation = "Largo - sobrevive hasta el final"
+            
+        print(f"   Interpretación: {interpretation}")
+        
+        print(f"\n✅ ¡PRUEBA EXITOSA!")
+        print(f"📝 El modelo funciona con {len(test_data)} características")
+        
+    except Exception as e:
+        print(f"❌ Error en la prueba: {str(e)}")
+        print(f"💡 Ajusta las características según tu modelo entrenado")
+
+def test_multiple_scenarios():
+    """Probar múltiples escenarios"""
+    
+    classifier, regressor = load_models()
+    if classifier is None or regressor is None:
+        return
+    
+    print(f"\n🎮 PROBANDO MÚLTIPLES ESCENARIOS:")
+    print("=" * 40)
+    
+    scenarios = [
+        {
+            "name": "Jugador Agresivo",
+            "data": [4, 3, 0, 10.0, 4000.0, 2, 0.9],
+            "description": "Muchos kills, headshots, poca distancia, granadas letales"
+        },
+        {
+            "name": "Jugador Defensivo", 
+            "data": [0, 0, 2, 60.0, 1500.0, 1, 0.8],
+            "description": "Sin kills, solo asistencias, poca distancia, defensivo"
+        },
+        {
+            "name": "Jugador Balanceado",
+            "data": [100, 1, 1, 25.0, 500000, 1, 0.7],
+            "description": "Kills moderados, balanceado en todas las estadísticas"
+        }
+    ]
+    
+    feature_names = [
+        "RoundKills", "RoundHeadshots", "RoundAssists", 
+        "FirstKillTime", "TravelledDistance", "RLethalGrenadesThrown", "PrimaryAssaultRifle"
+    ]
+    
+    for i, scenario in enumerate(scenarios, 1):
+        print(f"\n📊 Escenario {i}: {scenario['name']}")
+        print(f"   📝 Descripción: {scenario['description']}")
+        print(f"   📋 Datos:")
+        
+        # Mostrar cada característica con su valor
+        for j, (feature, value) in enumerate(zip(feature_names, scenario['data'])):
+            print(f"      {j+1}. {feature}: {value}")
+        
+        try:
+            X_test = np.array(scenario['data']).reshape(1, -1)
+            
+            # Predicciones
+            survival_pred = classifier.predict(X_test)[0]
+            survival_proba = classifier.predict_proba(X_test)[0]
+            time_pred = regressor.predict(X_test)[0]
+            
+            print(f"   🎯 Supervivencia: {'✅' if survival_pred else '❌'} ({survival_proba[1]:.1%})")
+            print(f"   ⏱️  Tiempo: {time_pred:.1f}s ({time_pred/60:.1f} min)")
+            
+            # Interpretación del tiempo
+            if time_pred < 30:
+                interpretation = "Muy corto - probablemente muere rápido"
+            elif time_pred < 90:
+                interpretation = "Corto - muere en la primera mitad"
+            elif time_pred < 150:
+                interpretation = "Medio - sobrevive hasta la mitad"
+            else:
+                interpretation = "Largo - sobrevive hasta el final"
+                
+            print(f"   💡 Interpretación: {interpretation}")
+            
+        except Exception as e:
+            print(f"   ❌ Error: {str(e)}")
+
+def main():
+    """Función principal"""
+    
+    # Prueba básica
+    test_with_correct_features()
+    
+    # Pruebas múltiples
+    test_multiple_scenarios()
+    
+    print(f"\n🎉 PRUEBAS COMPLETADAS!")
+    print(f"💡 Si las pruebas fallan, ajusta las características según tu modelo")
 
 if __name__ == "__main__":
     main()

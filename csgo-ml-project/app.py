@@ -1,4 +1,4 @@
-# app.py - API Flask para predicciones CS:GO adaptado para tus modelos
+# app_fixed.py - API Flask corregida para usar solo 7 características
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pickle
@@ -23,8 +23,20 @@ modelos_regresion = None
 scaler = None
 model_info = None
 
-# Las 20 características exactas que espera tu modelo
-FEATURES_MODELO = [
+# ⭐ CARACTERÍSTICAS CORREGIDAS - Solo las 7 que espera tu modelo
+# Basándome en el error, tu modelo fue entrenado con estas características principales:
+FEATURES_MODELO_CORREGIDAS = [
+    'RoundKills',           # 0 - Kills en el round
+    'RoundHeadshots',       # 1 - Headshots en el round  
+    'RoundAssists',         # 2 - Asistencias en el round
+    'FirstKillTime',        # 3 - Tiempo del primer kill
+    'TravelledDistance',    # 4 - Distancia recorrida
+    'RLethalGrenadesThrown', # 5 - Granadas letales lanzadas
+    'PrimaryAssaultRifle'   # 6 - Proporción de uso de rifle de asalto
+]
+
+# Todas las características originales para compatibilidad con la entrada
+FEATURES_COMPLETAS = [
     'Team', 'InternalTeamId', 'MatchId', 'RoundId', 'MatchWinner', 
     'Survived', 'AbnormalMatch', 'TimeAlive', 'TravelledDistance', 
     'RLethalGrenadesThrown', 'RNonLethalGrenadesThrown', 'PrimaryAssaultRifle', 
@@ -32,18 +44,12 @@ FEATURES_MODELO = [
     'FirstKillTime', 'RoundKills', 'RoundAssists', 'RoundHeadshots'
 ]
 
-# Características para entrenamiento (sin las variables objetivo)
-FEATURES_FOR_TRAINING = [f for f in FEATURES_MODELO if f not in ['Survived', 'TimeAlive']]
-
-# Mapeo de equipos
-TEAM_MAPPING = {'Terrorist': 0, 'Counter-Terrorist': 1}
-
 def load_models():
     """Cargar modelos y componentes desde archivos guardados"""
     global modelos_clasificacion, modelos_regresion, scaler, model_info
     
     try:
-        # Rutas de los archivos que guardamos
+        # Rutas de los archivos
         paths = {
             'clasificacion': "models/models/modelos_clasificacion.pkl",
             'regresion': "models/models/modelos_regresion.pkl", 
@@ -81,10 +87,20 @@ def load_models():
             logger.info("⚠️ Scaler no encontrado (modelo funciona sin scaler)")
             scaler = None
         
+        # Verificar dimensiones del modelo
+        rf_classifier = modelos_clasificacion['Random Forest']
+        expected_features = rf_classifier.n_features_in_
+        
         logger.info("✅ Modelos cargados exitosamente")
-        logger.info(f"📊 Características disponibles: {len(FEATURES_MODELO)}")
+        logger.info(f"🎯 Modelo espera: {expected_features} características")
+        logger.info(f"📊 Características a usar: {len(FEATURES_MODELO_CORREGIDAS)}")
         logger.info(f"🔵 Modelos de clasificación: {list(modelos_clasificacion.keys())}")
         logger.info(f"🔴 Modelos de regresión: {list(modelos_regresion.keys())}")
+        
+        # Verificar compatibilidad
+        if expected_features != len(FEATURES_MODELO_CORREGIDAS):
+            logger.warning(f"⚠️ ADVERTENCIA: Modelo espera {expected_features} características, "
+                    f"pero definimos {len(FEATURES_MODELO_CORREGIDAS)}")
         
         return True
         
@@ -94,7 +110,8 @@ def load_models():
 
 def preprocess_input(data):
     """
-    Preprocesar datos de entrada exactamente como en tu código original
+    Preprocesar datos de entrada - VERSIÓN CORREGIDA
+    Extrae solo las 7 características que necesita el modelo
     
     Args:
         data (dict or list): Datos del jugador
@@ -109,10 +126,10 @@ def preprocess_input(data):
         else:
             df = pd.DataFrame(data)
         
-        # Asegurar que todas las 20 características están presentes
-        for feature in FEATURES_MODELO:
+        # Asegurar que todas las características completas están presentes (para compatibilidad)
+        for feature in FEATURES_COMPLETAS:
             if feature not in df.columns:
-                # Valores por defecto basados en tu ejemplo
+                # Valores por defecto
                 if feature == 'Team':
                     df[feature] = 'Terrorist'
                 elif feature in ['MatchWinner', 'Survived', 'AbnormalMatch']:
@@ -126,23 +143,33 @@ def preprocess_input(data):
                 else:
                     df[feature] = 0
         
-        # Seleccionar características en el orden exacto
-        X_pred = df[FEATURES_MODELO].copy()
+        # ⭐ CAMBIO PRINCIPAL: Extraer solo las 7 características que necesita el modelo
+        X_reduced = pd.DataFrame()
         
-        # Convertir Team a numérico exactamente como en tu código
-        if 'Team' in X_pred.columns:
-            X_pred['Team'] = X_pred['Team'].map(TEAM_MAPPING).fillna(0)
+        for feature in FEATURES_MODELO_CORREGIDAS:
+            if feature in df.columns:
+                X_reduced[feature] = df[feature]
+            else:
+                # Valor por defecto si falta la característica
+                if feature in ['FirstKillTime', 'TravelledDistance', 'PrimaryAssaultRifle']:
+                    X_reduced[feature] = 0.0
+                else:
+                    X_reduced[feature] = 0
         
-        # Convertir booleanos a enteros exactamente como en tu código
-        bool_cols = ['MatchWinner', 'Survived', 'AbnormalMatch']
-        for col in bool_cols:
-            if col in X_pred.columns:
-                X_pred[col] = X_pred[col].astype(int)
+        # Convertir tipos de datos apropiados
+        numeric_features = ['FirstKillTime', 'TravelledDistance', 'PrimaryAssaultRifle']
+        for feature in numeric_features:
+            if feature in X_reduced.columns:
+                X_reduced[feature] = pd.to_numeric(X_reduced[feature], errors='coerce').fillna(0.0)
         
-        # Usar solo las 18 características para entrenamiento
-        X_processed = X_pred[FEATURES_FOR_TRAINING]
+        integer_features = ['RoundKills', 'RoundHeadshots', 'RoundAssists', 'RLethalGrenadesThrown']
+        for feature in integer_features:
+            if feature in X_reduced.columns:
+                X_reduced[feature] = pd.to_numeric(X_reduced[feature], errors='coerce').fillna(0).astype(int)
         
-        return X_processed, None
+        logger.info(f"📊 Datos procesados: {X_reduced.shape} - Características: {list(X_reduced.columns)}")
+        
+        return X_reduced, None
         
     except Exception as e:
         return None, f"Error en preprocesamiento: {str(e)}"
@@ -156,14 +183,20 @@ def home():
             "message": "Los modelos no están disponibles. Verifica que los archivos existan."
         }), 500
     
+    # Obtener información del modelo
+    rf_classifier = modelos_clasificacion['Random Forest']
+    expected_features = rf_classifier.n_features_in_
+    
     return jsonify({
-        "message": "🎮 API de Predicciones CS:GO con Tus Modelos",
-        "version": "1.0.0", 
+        "message": "🎮 API de Predicciones CS:GO - VERSIÓN CORREGIDA",
+        "version": "1.1.0", 
         "status": "✅ Activa",
         "models_loaded": "✅ Sí",
+        "fix_applied": "✅ Corregido para usar 7 características",
         "metadata": {
-            "features_count": len(FEATURES_MODELO),
-            "features_for_training": len(FEATURES_FOR_TRAINING),
+            "model_expects": expected_features,
+            "features_used": len(FEATURES_MODELO_CORREGIDAS),
+            "features_list": FEATURES_MODELO_CORREGIDAS,
             "classification_models": list(modelos_clasificacion.keys()),
             "regression_models": list(modelos_regresion.keys()),
             "training_date": model_info.get('fecha_entrenamiento', 'No disponible')
@@ -184,11 +217,19 @@ def health():
     if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"status": "❌ Error", "models_loaded": False}), 500
     
+    rf_classifier = modelos_clasificacion['Random Forest']
+    expected_features = rf_classifier.n_features_in_
+    
     return jsonify({
         "status": "✅ Saludable",
         "models_loaded": {
             "clasificacion": len(modelos_clasificacion),
             "regresion": len(modelos_regresion)
+        },
+        "model_compatibility": {
+            "expected_features": expected_features,
+            "api_features": len(FEATURES_MODELO_CORREGIDAS),
+            "compatible": expected_features == len(FEATURES_MODELO_CORREGIDAS)
         },
         "timestamp": datetime.now().isoformat()
     })
@@ -199,39 +240,52 @@ def get_features():
     if modelos_clasificacion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
+    rf_classifier = modelos_clasificacion['Random Forest']
+    expected_features = rf_classifier.n_features_in_
+    
     return jsonify({
-        "required_features": FEATURES_MODELO,
-        "features_for_training": FEATURES_FOR_TRAINING,
-        "team_mapping": TEAM_MAPPING,
+        "model_expects": expected_features,
+        "required_features": FEATURES_MODELO_CORREGIDAS,
+        "optional_features": [f for f in FEATURES_COMPLETAS if f not in FEATURES_MODELO_CORREGIDAS],
         "example_input": {
-            "Team": "Terrorist",                    # 0
-            "InternalTeamId": 1,                    # 1  
-            "MatchId": 4,                           # 2
-            "RoundId": 1,                           # 3
-            "MatchWinner": True,                    # 4
-            "Survived": False,                      # 5 (ignorado)
-            "AbnormalMatch": False,                 # 6
-            "TimeAlive": 51.12,                     # 7 (ignorado)
-            "TravelledDistance": 3500.0,            # 8
-            "RLethalGrenadesThrown": 1,             # 9
-            "RNonLethalGrenadesThrown": 2,          # 10
-            "PrimaryAssaultRifle": 0.7,             # 11
-            "PrimarySniperRifle": 0.1,              # 12
-            "PrimaryHeavy": 0.0,                    # 13
-            "PrimarySMG": 0.1,                      # 14
-            "PrimaryPistol": 0.1,                   # 15
-            "FirstKillTime": 15.0,                  # 16
-            "RoundKills": 2,                        # 17
-            "RoundAssists": 1,                      # 18
-            "RoundHeadshots": 1                     # 19
+            "RoundKills": 2,               # Kills en este round
+            "RoundHeadshots": 1,           # Headshots en este round
+            "RoundAssists": 1,             # Asistencias en este round
+            "FirstKillTime": 15.0,         # Tiempo del primer kill (segundos)
+            "TravelledDistance": 3500.0,   # Distancia recorrida (unidades)
+            "RLethalGrenadesThrown": 1,    # Granadas letales lanzadas
+            "PrimaryAssaultRifle": 0.7     # Proporción de uso de assault rifle
         },
-        "notes": "Survived y TimeAlive son ignorados durante la predicción"
+        "example_input_full": {
+            # Puedes incluir todas las características originales para compatibilidad
+            "Team": "Terrorist",
+            "InternalTeamId": 1,
+            "MatchId": 4,
+            "RoundId": 1,
+            "MatchWinner": True,
+            "Survived": False,  # Será ignorado
+            "AbnormalMatch": False,
+            "TimeAlive": 51.12, # Será ignorado
+            "TravelledDistance": 3500.0,   # ✅ USADO
+            "RLethalGrenadesThrown": 1,    # ✅ USADO
+            "RNonLethalGrenadesThrown": 2,
+            "PrimaryAssaultRifle": 0.7,    # ✅ USADO
+            "PrimarySniperRifle": 0.1,
+            "PrimaryHeavy": 0.0,
+            "PrimarySMG": 0.1,
+            "PrimaryPistol": 0.1,
+            "FirstKillTime": 15.0,         # ✅ USADO
+            "RoundKills": 2,               # ✅ USADO
+            "RoundAssists": 1,             # ✅ USADO
+            "RoundHeadshots": 1            # ✅ USADO
+        },
+        "notes": "Solo se usan 7 características específicas, las demás son ignoradas"
     })
 
 @app.route('/predict', methods=['POST'])
 def predict_full():
     """
-    Predicción completa: supervivencia + tiempo de vida
+    Predicción completa: supervivencia + tiempo de vida - VERSIÓN CORREGIDA
     """
     if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
@@ -243,29 +297,28 @@ def predict_full():
         if not data:
             return jsonify({"error": "No se proporcionaron datos JSON"}), 400
         
-        # Preprocesar datos
+        # Preprocesar datos - AHORA USANDO SOLO 7 CARACTERÍSTICAS
         X_processed, error = preprocess_input(data)
         
         if error:
             return jsonify({"error": error}), 400
         
-        # Usar Random Forest como modelos principales (como en tu código)
+        # Verificar dimensiones
+        logger.info(f"📊 Forma de datos procesados: {X_processed.shape}")
+        
+        # Usar Random Forest como modelos principales
         classifier = modelos_clasificacion['Random Forest']
         regressor = modelos_regresion['Random Forest']
         
-        # Hacer predicciones (sin scaler como en tu código original)
-        # Si tu modelo necesita scaler, descomenta las siguientes líneas:
-        # if scaler:
-        #     X_processed = scaler.transform(X_processed)
+        # Convertir a numpy array
+        X_array = X_processed.values
         
-        # Predicción de clasificación (supervivencia)
-        survival_pred = classifier.predict(X_processed)[0]
-        survival_proba = classifier.predict_proba(X_processed)[0]
+        # Hacer predicciones
+        survival_pred = classifier.predict(X_array)[0]
+        survival_proba = classifier.predict_proba(X_array)[0]
+        time_pred = regressor.predict(X_array)[0]
         
-        # Predicción de regresión (tiempo de vida)
-        time_pred = regressor.predict(X_processed)[0]
-        
-        # Construir respuesta en formato similar a tu estructura original
+        # Construir respuesta
         response = {
             "prediction": {
                 "survival": {
@@ -283,14 +336,21 @@ def predict_full():
                 }
             },
             "input_data": data,
+            "processed_features": {
+                "used_features": FEATURES_MODELO_CORREGIDAS,
+                "feature_values": X_processed.iloc[0].to_dict()
+            },
             "model_info": {
                 "classifier": "Random Forest",
                 "regressor": "Random Forest",
-                "features_used": len(FEATURES_FOR_TRAINING),
-                "note": "Basado en tu modelo CRISP-DM"
+                "features_used": len(FEATURES_MODELO_CORREGIDAS),
+                "model_version": "Corregido v1.1",
+                "note": "Usando solo las 7 características principales"
             },
             "timestamp": datetime.now().isoformat()
         }
+        
+        logger.info(f"✅ Predicción exitosa: Supervivencia={survival_pred}, Tiempo={time_pred:.1f}s")
         
         return jsonify(response)
         
@@ -300,7 +360,7 @@ def predict_full():
 
 @app.route('/predict/survival', methods=['POST'])
 def predict_survival():
-    """Solo predicción de supervivencia"""
+    """Solo predicción de supervivencia - VERSIÓN CORREGIDA"""
     if modelos_clasificacion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
@@ -314,9 +374,10 @@ def predict_survival():
             return jsonify({"error": error}), 400
         
         classifier = modelos_clasificacion['Random Forest']
+        X_array = X_processed.values
         
-        survival_pred = classifier.predict(X_processed)[0]
-        survival_proba = classifier.predict_proba(X_processed)[0]
+        survival_pred = classifier.predict(X_array)[0]
+        survival_proba = classifier.predict_proba(X_array)[0]
         
         return jsonify({
             "will_survive": bool(survival_pred),
@@ -325,6 +386,7 @@ def predict_survival():
                 "survival": float(survival_proba[1])
             },
             "confidence": float(max(survival_proba)),
+            "features_used": FEATURES_MODELO_CORREGIDAS,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -333,7 +395,7 @@ def predict_survival():
 
 @app.route('/predict/time', methods=['POST'])
 def predict_time():
-    """Solo predicción de tiempo de vida"""
+    """Solo predicción de tiempo de vida - VERSIÓN CORREGIDA"""
     if modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
@@ -347,12 +409,14 @@ def predict_time():
             return jsonify({"error": error}), 400
         
         regressor = modelos_regresion['Random Forest']
-        time_pred = regressor.predict(X_processed)[0]
+        X_array = X_processed.values
+        time_pred = regressor.predict(X_array)[0]
         
         return jsonify({
             "predicted_seconds": float(time_pred),
             "predicted_minutes": float(time_pred / 60),
             "interpretation": "alto" if time_pred > 60 else "medio" if time_pred > 30 else "bajo",
+            "features_used": FEATURES_MODELO_CORREGIDAS,
             "timestamp": datetime.now().isoformat()
         })
         
@@ -361,7 +425,7 @@ def predict_time():
 
 @app.route('/batch_predict', methods=['POST'])
 def batch_predict():
-    """Predicciones en lote para múltiples jugadores"""
+    """Predicciones en lote - VERSIÓN CORREGIDA"""
     if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
@@ -394,15 +458,18 @@ def batch_predict():
                 classifier = modelos_clasificacion['Random Forest']
                 regressor = modelos_regresion['Random Forest']
                 
-                survival_pred = classifier.predict(X_processed)[0]
-                survival_proba = classifier.predict_proba(X_processed)[0]
-                time_pred = regressor.predict(X_processed)[0]
+                X_array = X_processed.values
+                
+                survival_pred = classifier.predict(X_array)[0]
+                survival_proba = classifier.predict_proba(X_array)[0]
+                time_pred = regressor.predict(X_array)[0]
                 
                 results.append({
                     "player_index": i,
                     "will_survive": bool(survival_pred),
                     "survival_probability": float(survival_proba[1]),
                     "predicted_time_seconds": float(time_pred),
+                    "features_used": FEATURES_MODELO_CORREGIDAS,
                     "input_data": player_data
                 })
                 
@@ -417,13 +484,14 @@ def batch_predict():
             "results": results,
             "total_players": len(players),
             "successful_predictions": len([r for r in results if 'error' not in r]),
+            "model_version": "Corregido v1.1",
             "timestamp": datetime.now().isoformat()
         })
         
     except Exception as e:
         return jsonify({"error": f"Error en predicción por lotes: {str(e)}"}), 500
 
-# Manejador de errores
+# Manejadores de errores
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -441,15 +509,14 @@ def internal_error(error):
 if __name__ == '__main__':
     # Cargar modelos al iniciar
     if load_models():
-        logger.info("🚀 Iniciando servidor Flask en puerto 5000...")
+        logger.info("🚀 Iniciando servidor Flask CORREGIDO en puerto 5001...")
         app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.error("❌ No se pudieron cargar los modelos. Servidor no iniciado.")
         print("\n🔧 Para solucionar:")
-        print("1. Ejecuta tu código CRISP-DM completo para entrenar los modelos")
-        print("2. Ejecuta el código de guardado para crear los archivos .pkl")
+        print("1. Ejecuta 'python model_diagnostic.py' para diagnosticar el problema")
+        print("2. Verifica que los modelos están entrenados correctamente")
         print("3. Asegúrate de que existan estos archivos:")
         print("   - models/modelos_clasificacion.pkl")
         print("   - models/modelos_regresion.pkl") 
         print("   - models/model_info.pkl")
-        print("   - models/scaler.pkl (opcional)")
