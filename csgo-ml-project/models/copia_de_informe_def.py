@@ -144,56 +144,6 @@ file_path = "../data/Anexo ET_demo_round_traces_2022.csv"
 df = pd.read_csv(file_path, delimiter=';')
 
 
-# Seleccionamos todas las columnas numericas para el análisis a través de los boxplots
-columnas_boxplot = [
-    'RLethalGrenadesThrown', 'RNonLethalGrenadesThrown', 'PrimaryAssaultRifle',
-    'PrimarySniperRifle', 'PrimaryHeavy', 'PrimarySMG', 'PrimaryPistol',
-    'RoundKills', 'RoundAssists', 'RoundHeadshots', 'RoundFlankKills',
-    'RoundStartingEquipmentValue', 'TeamStartingEquipmentValue',
-    'MatchKills', 'MatchFlankKills', 'MatchAssists', 'MatchHeadshots'
-]
-
-print("\n1. BOXPLOTS INDIVIDUALES")
-print("-" * 40)
-
-for col in columnas_boxplot:
-    if col in df.columns:
-        plt.figure(figsize=(10, 4))
-
-        # Crear subplot con boxplot y estadísticas
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-        # Boxplot
-        sns.boxplot(data=df, x=col, ax=ax1)
-        ax1.set_title(f"Boxplot: {col}", fontsize=12, fontweight='bold')
-        ax1.grid(True, alpha=0.3)
-
-        # Histograma
-        sns.histplot(data=df, x=col, bins=30, ax=ax2)
-        ax2.set_title(f"Distribución: {col}", fontsize=12, fontweight='bold')
-        ax2.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-
-        # Estadísticas de outliers
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-
-        outliers = df[(df[col] < lower_bound) | (df[col] > upper_bound)]
-        outlier_count = len(outliers)
-        outlier_percent = (outlier_count / len(df)) * 100
-
-        print(f" {col}:")
-        print(f"   Outliers detectados: {outlier_count} ({outlier_percent:.2f}%)")
-        print(f"   Rango normal: [{lower_bound:.2f}, {upper_bound:.2f}]")
-        print(f"   Min: {df[col].min():.2f} | Max: {df[col].max():.2f}")
-        print(f"   Media: {df[col].mean():.2f} | Mediana: {df[col].median():.2f}")
-        print("-" * 60)
-
 """## Fase 3: Data Preparation"""
 
 # Insertar cuantos bloques de código consideren necesarios
@@ -637,15 +587,6 @@ def predict_timealive(modelo_clf, modelo_reg, X_new):
 
     return time_pred
 
-plt.figure(figsize=(10, 4))
-plt.subplot(121)
-df[target].hist(bins=30)
-plt.title('Distribución de TimeAlive')
-
-plt.subplot(122)
-df[df[target]>0][target].hist(bins=30)
-plt.title('Distribución de TimeAlive > 0')
-plt.show()
 
 def evaluar_modelos(modelos_entrenados, datos_modelado, estilo='rich'):
     """
