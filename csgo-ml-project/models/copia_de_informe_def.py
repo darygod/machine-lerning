@@ -137,16 +137,9 @@ from sklearn.svm import SVC
 warnings.filterwarnings('ignore')
 
 # Importamos el archivo csv
-
-from google.colab import files
-
-uploaded = files.upload()
-
-# Obtenemos el nombre del archivo subido
-file_name = next(iter(uploaded))
-
+file_path = "../data/Anexo ET_demo_round_traces_2022.csv"
 # Leemos el CSV en un DataFrame
-df = pd.read_csv(io.BytesIO(uploaded[file_name]), sep=';')
+df = pd.read_csv(file_path, delimiter=';')
 
 # Dimensiones del dataset
 print("Número de filas y columnas:", df.shape)
