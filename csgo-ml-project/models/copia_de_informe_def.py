@@ -143,31 +143,6 @@ file_path = "../data/Anexo ET_demo_round_traces_2022.csv"
 # Leemos el CSV en un DataFrame
 df = pd.read_csv(file_path, delimiter=';')
 
-# Dimensiones del dataset
-print("Número de filas y columnas:", df.shape)
-
-# Nombres de columnas
-print("\nColumnas del dataset:")
-print(df.columns.tolist())
-
-# Primeras filas del dataset
-print("\nPrimeras filas:")
-display(df.head())
-
-# Tipos de datos y valores no nulos por columna
-print("\nInformación general del DataFrame:")
-df.info()
-
-# Conteo de valores nulos
-print("\nValores nulos por columna:")
-missing = df.isnull().sum()
-missing_percent = (missing / len(df)) * 100
-missing_df = pd.DataFrame({'Valores_nulos': missing, 'Porcentaje': missing_percent})
-display(missing_df[missing_df['Valores_nulos'] > 0].sort_values('Porcentaje', ascending=False))
-
-# Estadísticas descriptivas de variables numéricas
-print("\nEstadísticas descriptivas:")
-display(df.describe().T)
 
 # Seleccionamos todas las columnas numericas para el análisis a través de los boxplots
 columnas_boxplot = [
