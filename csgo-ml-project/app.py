@@ -1,7 +1,7 @@
-# app.py - API Flask para predicciones CS:GO
+# app.py - API Flask para predicciones CS:GO adaptado para tus modelos
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import joblib
+import pickle
 import pandas as pd
 import numpy as np
 import os
@@ -18,37 +18,73 @@ app = Flask(__name__)
 CORS(app)  # Permitir requests desde cualquier origen
 
 # Variables globales para el modelo
-model_package = None
-models = None
-scalers = None
-features = None
-metadata = None
+modelos_clasificacion = None
+modelos_regresion = None
+scaler = None
+model_info = None
+
+# Las 20 características exactas que espera tu modelo
+FEATURES_MODELO = [
+    'Team', 'InternalTeamId', 'MatchId', 'RoundId', 'MatchWinner', 
+    'Survived', 'AbnormalMatch', 'TimeAlive', 'TravelledDistance', 
+    'RLethalGrenadesThrown', 'RNonLethalGrenadesThrown', 'PrimaryAssaultRifle', 
+    'PrimarySniperRifle', 'PrimaryHeavy', 'PrimarySMG', 'PrimaryPistol', 
+    'FirstKillTime', 'RoundKills', 'RoundAssists', 'RoundHeadshots'
+]
+
+# Características para entrenamiento (sin las variables objetivo)
+FEATURES_FOR_TRAINING = [f for f in FEATURES_MODELO if f not in ['Survived', 'TimeAlive']]
+
+# Mapeo de equipos
+TEAM_MAPPING = {'Terrorist': 0, 'Counter-Terrorist': 1}
 
 def load_models():
     """Cargar modelos y componentes desde archivos guardados"""
-    global model_package, models, scalers, features, metadata
+    global modelos_clasificacion, modelos_regresion, scaler, model_info
     
     try:
-        # Verificar que el archivo existe
-        model_path = "saved_models/csgo_model_package.pkl"
+        # Rutas de los archivos que guardamos
+        paths = {
+            'clasificacion': "models/models/modelos_clasificacion.pkl",
+            'regresion': "models/models/modelos_regresion.pkl", 
+            'info': "models/models/model_info.pkl",
+            'scaler': "models/models/scaler.pkl"
+        }
         
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"No se encontró el archivo de modelo en: {model_path}")
+        # Verificar que los archivos existen
+        missing_files = []
+        for name, path in paths.items():
+            if not os.path.exists(path):
+                missing_files.append(path)
         
-        # Cargar el paquete completo
+        if missing_files:
+            raise FileNotFoundError(f"Archivos faltantes: {missing_files}")
+        
+        # Cargar modelos
         logger.info("🔄 Cargando modelos...")
-        model_package = joblib.load(model_path)
         
-        # Extraer componentes
-        models = model_package['models']
-        scalers = model_package['scalers']
-        features = model_package['features']
-        metadata = model_package['metadata']
+        with open(paths['clasificacion'], 'rb') as f:
+            modelos_clasificacion = pickle.load(f)
+            
+        with open(paths['regresion'], 'rb') as f:
+            modelos_regresion = pickle.load(f)
+            
+        with open(paths['info'], 'rb') as f:
+            model_info = pickle.load(f)
+            
+        # Cargar scaler si existe
+        try:
+            with open(paths['scaler'], 'rb') as f:
+                scaler = pickle.load(f)
+            logger.info("✅ Scaler cargado")
+        except FileNotFoundError:
+            logger.info("⚠️ Scaler no encontrado (modelo funciona sin scaler)")
+            scaler = None
         
         logger.info("✅ Modelos cargados exitosamente")
-        logger.info(f"📊 Características disponibles: {len(features['available_features'])}")
-        logger.info(f"🎯 Accuracy RF Classifier: {metadata['rf_clf_accuracy']:.4f}")
-        logger.info(f"📈 R² RF Regressor: {metadata['rf_reg_r2']:.4f}")
+        logger.info(f"📊 Características disponibles: {len(FEATURES_MODELO)}")
+        logger.info(f"🔵 Modelos de clasificación: {list(modelos_clasificacion.keys())}")
+        logger.info(f"🔴 Modelos de regresión: {list(modelos_regresion.keys())}")
         
         return True
         
@@ -58,10 +94,10 @@ def load_models():
 
 def preprocess_input(data):
     """
-    Preprocesar datos de entrada para las predicciones
+    Preprocesar datos de entrada exactamente como en tu código original
     
     Args:
-        data (dict): Datos del jugador
+        data (dict or list): Datos del jugador
         
     Returns:
         tuple: (X_processed, error_message)
@@ -73,65 +109,38 @@ def preprocess_input(data):
         else:
             df = pd.DataFrame(data)
         
-        # Mapear variables categóricas
-        categorical_mapping = features['categorical_mapping']
+        # Asegurar que todas las 20 características están presentes
+        for feature in FEATURES_MODELO:
+            if feature not in df.columns:
+                # Valores por defecto basados en tu ejemplo
+                if feature == 'Team':
+                    df[feature] = 'Terrorist'
+                elif feature in ['MatchWinner', 'Survived', 'AbnormalMatch']:
+                    df[feature] = False
+                elif feature in ['InternalTeamId', 'MatchId', 'RoundId']:
+                    df[feature] = 1
+                elif feature in ['TimeAlive', 'TravelledDistance', 'FirstKillTime']:
+                    df[feature] = 0.0
+                elif feature.startswith('Primary'):
+                    df[feature] = 0.0
+                else:
+                    df[feature] = 0
         
-        # Codificar Team si está presente
-        if 'Team' in df.columns:
-            if df['Team'].iloc[0] in categorical_mapping['Team']:
-                df['Team_Encoded'] = df['Team'].map(categorical_mapping['Team'])
-            else:
-                return None, f"Valor de Team inválido. Usar: {list(categorical_mapping['Team'].keys())}"
-        else:
-            # Valor por defecto si no se proporciona
-            df['Team_Encoded'] = 0
+        # Seleccionar características en el orden exacto
+        X_pred = df[FEATURES_MODELO].copy()
         
-        # Codificar MatchWinner si está presente
-        if 'MatchWinner' in df.columns:
-            df['MatchWinner_Encoded'] = df['MatchWinner'].astype(int)
-        else:
-            # Valor por defecto si no se proporciona
-            df['MatchWinner_Encoded'] = 0
+        # Convertir Team a numérico exactamente como en tu código
+        if 'Team' in X_pred.columns:
+            X_pred['Team'] = X_pred['Team'].map(TEAM_MAPPING).fillna(0)
         
-        # Asegurar que todas las características requeridas estén presentes
-        available_features = features['available_features']
+        # Convertir booleanos a enteros exactamente como en tu código
+        bool_cols = ['MatchWinner', 'Survived', 'AbnormalMatch']
+        for col in bool_cols:
+            if col in X_pred.columns:
+                X_pred[col] = X_pred[col].astype(int)
         
-        # Crear DataFrame con todas las características, rellenando con valores por defecto
-        X_processed = pd.DataFrame(columns=available_features)
-        
-        # Valores por defecto para características faltantes
-        default_values = {
-            'InternalTeamId': 1,
-            'MatchId': 1,
-            'RoundId': 1,
-            'TravelledDistance': 2000.0,
-            'RLethalGrenadesThrown': 0,
-            'RNonLethalGrenadesThrown': 0,
-            'PrimaryAssaultRifle': 0.8,
-            'PrimarySniperRifle': 0.0,
-            'PrimaryHeavy': 0.0,
-            'PrimarySMG': 0.1,
-            'PrimaryPistol': 0.1,
-            'FirstKillTime': 30.0,
-            'RoundKills': 1,
-            'RoundAssists': 0,
-            'RoundHeadshots': 0,
-            'RoundStartingEquipmentValue': 3000,
-            'TeamStartingEquipmentValue': 15000,
-            'Team_Encoded': 0,
-            'MatchWinner_Encoded': 0
-        }
-        
-        # Llenar características una por una
-        for feature in available_features:
-            if feature in df.columns:
-                X_processed[feature] = df[feature]
-            else:
-                # Usar valor por defecto
-                X_processed[feature] = [default_values.get(feature, 0)]
-        
-        # Convertir a tipos numéricos
-        X_processed = X_processed.astype(float)
+        # Usar solo las 18 características para entrenamiento
+        X_processed = X_pred[FEATURES_FOR_TRAINING]
         
         return X_processed, None
         
@@ -141,28 +150,29 @@ def preprocess_input(data):
 @app.route('/', methods=['GET'])
 def home():
     """Endpoint de inicio con información de la API"""
-    if model_package is None:
+    if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({
             "error": "Modelos no cargados",
             "message": "Los modelos no están disponibles. Verifica que los archivos existan."
         }), 500
     
     return jsonify({
-        "message": "🎮 API de Predicciones CS:GO",
-        "version": "1.0.0",
+        "message": "🎮 API de Predicciones CS:GO con Tus Modelos",
+        "version": "1.0.0", 
         "status": "✅ Activa",
         "models_loaded": "✅ Sí",
         "metadata": {
-            "features_count": len(features['available_features']),
-            "rf_classifier_accuracy": f"{metadata['rf_clf_accuracy']:.4f}",
-            "rf_regressor_r2": f"{metadata['rf_reg_r2']:.4f}",
-            "training_samples_clf": metadata['training_samples_clf'],
-            "training_samples_reg": metadata['training_samples_reg']
+            "features_count": len(FEATURES_MODELO),
+            "features_for_training": len(FEATURES_FOR_TRAINING),
+            "classification_models": list(modelos_clasificacion.keys()),
+            "regression_models": list(modelos_regresion.keys()),
+            "training_date": model_info.get('fecha_entrenamiento', 'No disponible')
         },
         "endpoints": {
             "/predict": "Predicción completa (supervivencia + tiempo)",
-            "/predict/survival": "Solo predicción de supervivencia",
+            "/predict/survival": "Solo predicción de supervivencia", 
             "/predict/time": "Solo predicción de tiempo",
+            "/batch_predict": "Predicciones en lote",
             "/health": "Estado de la API",
             "/features": "Lista de características requeridas"
         }
@@ -171,46 +181,51 @@ def home():
 @app.route('/health', methods=['GET'])
 def health():
     """Endpoint de salud de la API"""
-    if model_package is None:
+    if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"status": "❌ Error", "models_loaded": False}), 500
     
     return jsonify({
         "status": "✅ Saludable",
-        "models_loaded": True,
+        "models_loaded": {
+            "clasificacion": len(modelos_clasificacion),
+            "regresion": len(modelos_regresion)
+        },
         "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/features', methods=['GET'])
 def get_features():
     """Obtener lista de características que acepta el modelo"""
-    if model_package is None:
+    if modelos_clasificacion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
     return jsonify({
-        "required_features": features['features_api'],
-        "all_features": features['available_features'],
-        "categorical_mappings": features['categorical_mapping'],
+        "required_features": FEATURES_MODELO,
+        "features_for_training": FEATURES_FOR_TRAINING,
+        "team_mapping": TEAM_MAPPING,
         "example_input": {
-            "Team": "Terrorist",
-            "InternalTeamId": 1,
-            "MatchId": 100,
-            "RoundId": 5,
-            "MatchWinner": True,
-            "TravelledDistance": 3500.0,
-            "RLethalGrenadesThrown": 1,
-            "RNonLethalGrenadesThrown": 2,
-            "PrimaryAssaultRifle": 0.7,
-            "PrimarySniperRifle": 0.1,
-            "PrimaryHeavy": 0.0,
-            "PrimarySMG": 0.1,
-            "PrimaryPistol": 0.1,
-            "FirstKillTime": 15.0,
-            "RoundKills": 2,
-            "RoundAssists": 1,
-            "RoundHeadshots": 1,
-            "RoundStartingEquipmentValue": 4000,
-            "TeamStartingEquipmentValue": 18000
-        }
+            "Team": "Terrorist",                    # 0
+            "InternalTeamId": 1,                    # 1  
+            "MatchId": 4,                           # 2
+            "RoundId": 1,                           # 3
+            "MatchWinner": True,                    # 4
+            "Survived": False,                      # 5 (ignorado)
+            "AbnormalMatch": False,                 # 6
+            "TimeAlive": 51.12,                     # 7 (ignorado)
+            "TravelledDistance": 3500.0,            # 8
+            "RLethalGrenadesThrown": 1,             # 9
+            "RNonLethalGrenadesThrown": 2,          # 10
+            "PrimaryAssaultRifle": 0.7,             # 11
+            "PrimarySniperRifle": 0.1,              # 12
+            "PrimaryHeavy": 0.0,                    # 13
+            "PrimarySMG": 0.1,                      # 14
+            "PrimaryPistol": 0.1,                   # 15
+            "FirstKillTime": 15.0,                  # 16
+            "RoundKills": 2,                        # 17
+            "RoundAssists": 1,                      # 18
+            "RoundHeadshots": 1                     # 19
+        },
+        "notes": "Survived y TimeAlive son ignorados durante la predicción"
     })
 
 @app.route('/predict', methods=['POST'])
@@ -218,7 +233,7 @@ def predict_full():
     """
     Predicción completa: supervivencia + tiempo de vida
     """
-    if model_package is None:
+    if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
     try:
@@ -234,25 +249,23 @@ def predict_full():
         if error:
             return jsonify({"error": error}), 400
         
-        # Modelos a usar (mejores según entrenamiento)
-        classifier = models['rf_classifier']
-        regressor = models['rf_regressor']
-        scaler_clf = scalers['scaler_classification']
-        scaler_reg = scalers['scaler_regression']
+        # Usar Random Forest como modelos principales (como en tu código)
+        classifier = modelos_clasificacion['Random Forest']
+        regressor = modelos_regresion['Random Forest']
         
-        # Escalar datos
-        X_clf_scaled = scaler_clf.transform(X_processed)
-        X_reg_scaled = scaler_reg.transform(X_processed)
+        # Hacer predicciones (sin scaler como en tu código original)
+        # Si tu modelo necesita scaler, descomenta las siguientes líneas:
+        # if scaler:
+        #     X_processed = scaler.transform(X_processed)
         
-        # Predicciones
-        # Clasificación (supervivencia)
-        survival_pred = classifier.predict(X_clf_scaled)[0]
-        survival_proba = classifier.predict_proba(X_clf_scaled)[0]
+        # Predicción de clasificación (supervivencia)
+        survival_pred = classifier.predict(X_processed)[0]
+        survival_proba = classifier.predict_proba(X_processed)[0]
         
-        # Regresión (tiempo de vida)
-        time_pred = regressor.predict(X_reg_scaled)[0]
+        # Predicción de regresión (tiempo de vida)
+        time_pred = regressor.predict(X_processed)[0]
         
-        # Construir respuesta
+        # Construir respuesta en formato similar a tu estructura original
         response = {
             "prediction": {
                 "survival": {
@@ -273,8 +286,8 @@ def predict_full():
             "model_info": {
                 "classifier": "Random Forest",
                 "regressor": "Random Forest",
-                "classifier_accuracy": f"{metadata['rf_clf_accuracy']:.4f}",
-                "regressor_r2": f"{metadata['rf_reg_r2']:.4f}"
+                "features_used": len(FEATURES_FOR_TRAINING),
+                "note": "Basado en tu modelo CRISP-DM"
             },
             "timestamp": datetime.now().isoformat()
         }
@@ -288,7 +301,7 @@ def predict_full():
 @app.route('/predict/survival', methods=['POST'])
 def predict_survival():
     """Solo predicción de supervivencia"""
-    if model_package is None:
+    if modelos_clasificacion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
     try:
@@ -300,13 +313,10 @@ def predict_survival():
         if error:
             return jsonify({"error": error}), 400
         
-        classifier = models['rf_classifier']
-        scaler_clf = scalers['scaler_classification']
+        classifier = modelos_clasificacion['Random Forest']
         
-        X_clf_scaled = scaler_clf.transform(X_processed)
-        
-        survival_pred = classifier.predict(X_clf_scaled)[0]
-        survival_proba = classifier.predict_proba(X_clf_scaled)[0]
+        survival_pred = classifier.predict(X_processed)[0]
+        survival_proba = classifier.predict_proba(X_processed)[0]
         
         return jsonify({
             "will_survive": bool(survival_pred),
@@ -324,7 +334,7 @@ def predict_survival():
 @app.route('/predict/time', methods=['POST'])
 def predict_time():
     """Solo predicción de tiempo de vida"""
-    if model_package is None:
+    if modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
     try:
@@ -336,11 +346,8 @@ def predict_time():
         if error:
             return jsonify({"error": error}), 400
         
-        regressor = models['rf_regressor']
-        scaler_reg = scalers['scaler_regression']
-        
-        X_reg_scaled = scaler_reg.transform(X_processed)
-        time_pred = regressor.predict(X_reg_scaled)[0]
+        regressor = modelos_regresion['Random Forest']
+        time_pred = regressor.predict(X_processed)[0]
         
         return jsonify({
             "predicted_seconds": float(time_pred),
@@ -355,14 +362,14 @@ def predict_time():
 @app.route('/batch_predict', methods=['POST'])
 def batch_predict():
     """Predicciones en lote para múltiples jugadores"""
-    if model_package is None:
+    if modelos_clasificacion is None or modelos_regresion is None:
         return jsonify({"error": "Modelos no cargados"}), 500
     
     try:
         data = request.get_json()
         
         if not data or 'players' not in data:
-            return jsonify({"error": "Formato requerido: {'players': [...]"}), 400
+            return jsonify({"error": "Formato requerido: {'players': [...]}"}), 400
         
         players = data['players']
         
@@ -383,18 +390,13 @@ def batch_predict():
                     })
                     continue
                 
-                # Predicciones
-                classifier = models['rf_classifier']
-                regressor = models['rf_regressor']
-                scaler_clf = scalers['scaler_classification']
-                scaler_reg = scalers['scaler_regression']
+                # Predicciones con Random Forest
+                classifier = modelos_clasificacion['Random Forest']
+                regressor = modelos_regresion['Random Forest']
                 
-                X_clf_scaled = scaler_clf.transform(X_processed)
-                X_reg_scaled = scaler_reg.transform(X_processed)
-                
-                survival_pred = classifier.predict(X_clf_scaled)[0]
-                survival_proba = classifier.predict_proba(X_clf_scaled)[0]
-                time_pred = regressor.predict(X_reg_scaled)[0]
+                survival_pred = classifier.predict(X_processed)[0]
+                survival_proba = classifier.predict_proba(X_processed)[0]
+                time_pred = regressor.predict(X_processed)[0]
                 
                 results.append({
                     "player_index": i,
@@ -439,11 +441,15 @@ def internal_error(error):
 if __name__ == '__main__':
     # Cargar modelos al iniciar
     if load_models():
-        logger.info("🚀 Iniciando servidor Flask...")
+        logger.info("🚀 Iniciando servidor Flask en puerto 5000...")
         app.run(debug=True, host='0.0.0.0', port=5001)
     else:
         logger.error("❌ No se pudieron cargar los modelos. Servidor no iniciado.")
         print("\n🔧 Para solucionar:")
-        print("1. Ejecuta primero 'python save_model.py' para entrenar y guardar los modelos")
-        print("2. Asegúrate de que el archivo 'saved_models/csgo_model_package.pkl' existe")
-        print("3. Verifica que el directorio de datos '../data/' existe con el CSV")
+        print("1. Ejecuta tu código CRISP-DM completo para entrenar los modelos")
+        print("2. Ejecuta el código de guardado para crear los archivos .pkl")
+        print("3. Asegúrate de que existan estos archivos:")
+        print("   - models/modelos_clasificacion.pkl")
+        print("   - models/modelos_regresion.pkl") 
+        print("   - models/model_info.pkl")
+        print("   - models/scaler.pkl (opcional)")
