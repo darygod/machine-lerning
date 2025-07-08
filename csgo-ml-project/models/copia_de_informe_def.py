@@ -133,6 +133,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 
+
+from IPython.display import display
 # Configuración
 warnings.filterwarnings('ignore')
 
