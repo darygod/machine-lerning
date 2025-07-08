@@ -1,5 +1,4 @@
-/venv
-
-
-#datos de prueba 
-/data/processed/*
+   /venv/
+   /data/
+   *.pyc
+   __pycache__/
